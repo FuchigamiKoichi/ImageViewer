@@ -1,0 +1,11 @@
+{
+  "name": "image-viewer-clean-arch",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "node src/framework/server.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

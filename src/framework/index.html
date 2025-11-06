@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Viewer - Clean Architecture Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
+    header { background: #333; color: white; padding: 1rem 2rem; display: flex; align-items: center; gap: 2rem; }
+    header h1 { font-size: 1.5rem; }
+    .tabs { display: flex; gap: 0.5rem; overflow-x: auto; }
+    .tab { padding: 0.5rem 1rem; border-radius: 4px; background: #555; cursor: pointer; white-space: nowrap; }
+    .tab.active { background: #4caf50; }
+    main { max-width: 1400px; margin: 2rem auto; padding: 0 2rem; }
+    .controls { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+    .controls select, .controls input { padding: 0.5rem; border-radius: 4px; border: 1px solid #ddd; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1.5rem; }
+    .card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s; }
+    .card:hover { transform: translateY(-4px); }
+    .card img { width: 100%; height: 200px; object-fit: cover; background: #eee; }
+    .card-body { padding: 1rem; }
+    .card-title { font-weight: 600; margin-bottom: 0.5rem; }
+    .tags { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .tag { font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 3px; background: #e3f2fd; color: #1976d2; }
+    .viewer { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.95); z-index: 1000; cursor: pointer; }
+    .viewer.active { display: flex; align-items: center; justify-content: center; flex-direction: column; }
+    .viewer-image-container { display: flex; align-items: center; justify-content: center; width: 100vw; height: 100vh; }
+    .viewer img { display: block; }
+    .viewer-controls { position: fixed; bottom: 0; left: 0; right: 0; padding: 1rem; display: flex; gap: 1rem; justify-content: center; background: linear-gradient(transparent, rgba(0,0,0,0.8)); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .viewer.show-controls .viewer-controls { opacity: 1; pointer-events: auto; }
+    .btn { padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #4caf50; color: white; cursor: pointer; font-size: 1rem; }
+    .btn:hover { background: #45a049; }
+    .btn-secondary { background: #555; }
+    .btn-secondary:hover { background: #666; }
+    .btn-upload { background: #2196f3; margin-left: auto; }
+    .btn-upload:hover { background: #1976d2; }
+    .status { text-align: center; padding: 2rem; color: #666; }
+    .upload-modal { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center; }
+    .upload-modal.active { display: flex; }
+  .upload-form { background: white; padding: 2rem; border-radius: 8px; max-width: 560px; width: 92%; }
+    .upload-form h2 { margin-bottom: 1.5rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 1rem; }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-actions { display: flex; gap: 1rem; margin-top: 1.5rem; }
+    .tag-checkboxes { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .tag-checkbox { display: flex; align-items: center; gap: 0.25rem; }
+  .preview-img { max-width: 100%; max-height: 220px; margin-top: 0.5rem; border-radius: 4px; }
+  .drop-zone { border: 2px dashed #90caf9; border-radius: 8px; padding: 1rem; text-align: center; color: #1976d2; background: #e3f2fd33; }
+  .drop-zone.dragover { background: #bbdefb66; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🖼️ Image Viewer</h1>
+    <div class="tabs" id="tabs"></div>
+  <button class="btn btn-upload" onclick="openUploadModal()">📤 画像追加</button>
+  <button class="btn btn-upload" onclick="openTagModal()" style="margin-left: 0.5rem;">🏷️ タグ追加</button>
+  </header>
+  <main>
+    <div class="controls">
+      <input type="text" id="searchInput" placeholder="タグ検索 (例: nature AND featured, people OR landscape)" style="flex: 1;" />
+      <button class="btn" onclick="searchByExpression()">検索</button>
+      <button class="btn btn-secondary" onclick="clearSearch()">クリア</button>
+    </div>
+    <div class="status" id="status">読込中...</div>
+    <div class="grid" id="gallery"></div>
+  </main>
+  
+  <!-- Upload Modal -->
+  <div class="upload-modal" id="uploadModal">
+    <div class="upload-form">
+      <h2>画像を追加</h2>
+      <form id="uploadForm" onsubmit="handleUpload(event)">
+        <div class="form-group">
+          <label>ファイルアップロード *</label>
+          <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+            ここに画像ファイルをドラッグ＆ドロップ、またはクリックして選択
+            <input type="file" id="fileInput" accept="image/*" style="display:none">
+          </div>
+          <img id="previewImage" class="preview-img" style="display:none;">
+        </div>
+        <div class="form-group">
+          <label for="imageDescription">説明</label>
+          <textarea id="imageDescription" placeholder="画像の説明"></textarea>
+        </div>
+        <div class="form-group">
+          <label>タグ *</label>
+          <div class="tag-checkboxes" id="tagCheckboxes"></div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">追加</button>
+          <button type="button" class="btn btn-secondary" onclick="closeUploadModal()">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Tag Creation Modal -->
+  <div class="upload-modal" id="tagModal">
+    <div class="upload-form">
+      <h2>タグを追加</h2>
+      <form id="tagForm" onsubmit="handleCreateTag(event)">
+        <div class="form-group">
+          <label for="tagId">タグID * (英数字のみ)</label>
+          <input type="text" id="tagId" required placeholder="nature" pattern="[a-zA-Z0-9_-]+">
+        </div>
+        <div class="form-group">
+          <label for="tagName">表示名 *</label>
+          <input type="text" id="tagName" required placeholder="自然">
+        </div>
+        <div class="form-group">
+          <label for="tagColor">色</label>
+          <input type="color" id="tagColor" value="#4caf50">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">追加</button>
+          <button type="button" class="btn btn-secondary" onclick="closeTagModal()">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Edit Image Modal -->
+  <div class="upload-modal" id="editModal">
+    <div class="upload-form">
+      <h2>画像を編集</h2>
+      <form id="editForm" onsubmit="handleEditImage(event)">
+        <div class="form-group">
+          <label for="editTitle">タイトル</label>
+          <input type="text" id="editTitle" placeholder="画像のタイトル">
+        </div>
+        <div class="form-group">
+          <label for="editDescription">説明</label>
+          <textarea id="editDescription" placeholder="画像の説明"></textarea>
+        </div>
+        <div class="form-group">
+          <label>タグ *</label>
+          <div class="tag-checkboxes" id="editTagCheckboxes"></div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">保存</button>
+          <button type="button" class="btn btn-secondary" onclick="closeEditModal()">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <div class="viewer" id="viewer">
+    <div class="viewer-image-container" onclick="event.stopPropagation()">
+      <img id="viewerImg" src="" alt="">
+    </div>
+    <div class="viewer-controls">
+      <button class="btn btn-secondary" onclick="prevImage(); event.stopPropagation();">← 前</button>
+      <button class="btn btn-secondary" onclick="closeViewer(); event.stopPropagation();">閉じる (Esc)</button>
+      <button class="btn btn-secondary" onclick="nextImage(); event.stopPropagation();">次 →</button>
+      <button class="btn btn-secondary" onclick="openEditModal(); event.stopPropagation();">✏️ 編集</button>
+      <button class="btn btn-secondary" style="background: #d32f2f;" onclick="deleteCurrentImage(); event.stopPropagation();">🗑️ 削除</button>
+    </div>
+  </div>
+  <script>
+    let allImages = []; let filteredImages = []; let currentIndex = 0; let currentTags = []; let currentLogic = 'OR';
+    let tabs = []; let tags = [];
+
+    async function init() {
+      try {
+        [tabs, tags] = await Promise.all([
+          fetch('/tabs').then(r => r.json()),
+          fetch('/tags').then(r => r.json())
+        ]);
+        const imageData = await fetch('/images').then(r => r.json());
+        allImages = imageData.items;
+        renderTabs(); 
+        renderGallery(allImages);
+      } catch (e) { document.getElementById('status').textContent = 'エラー: ' + e.message; }
+    }
+
+    function renderTabs() {
+      const container = document.getElementById('tabs');
+      container.innerHTML = tabs.map(t => 
+        `<div class="tab ${t.id === 'all' ? 'active' : ''}" onclick="selectTab('${t.id}')">${t.name}</div>`
+      ).join('');
+    }
+
+    async function selectTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      const tab = tabs.find(t => t.id === tabId);
+      
+      // Clear search input when selecting a tab
+      document.getElementById('searchInput').value = '';
+      
+      // "All" タブの場合は全画像を表示
+      if (tab.id === 'all' || !tab.tagIds || tab.tagIds.length === 0) {
+        filteredImages = allImages;
+        renderGallery(filteredImages);
+        return;
+      }
+      
+      currentTags = tab.tagIds;
+      currentLogic = tab.logic || 'OR';
+      await loadImages();
+    }
+
+    async function loadImages() {
+      const url = currentTags.length ? `/images?tags=${currentTags.join(',')}&logic=${currentLogic}` : '/images';
+      const data = await fetch(url).then(r => r.json());
+      filteredImages = data.items;
+      renderGallery(filteredImages);
+    }
+    
+    function parseSearchExpression(expr) {
+      // Parse expressions like "nature AND featured" or "people OR landscape"
+      // Returns array of {tags: [], logic: 'AND'|'OR'} groups
+      expr = expr.trim();
+      if (!expr) return null;
+      
+      // Split by OR first (lower precedence)
+      const orParts = expr.split(/\s+OR\s+/i);
+      if (orParts.length > 1) {
+        // Multiple OR groups - collect all tags and use OR logic
+        const allTags = orParts.flatMap(part => 
+          part.split(/\s+AND\s+/i).map(t => t.trim()).filter(Boolean)
+        );
+        return { tags: allTags, logic: 'OR' };
+      }
+      
+      // Split by AND (higher precedence)
+      const andParts = expr.split(/\s+AND\s+/i);
+      if (andParts.length > 1) {
+        const allTags = andParts.map(t => t.trim()).filter(Boolean);
+        return { tags: allTags, logic: 'AND' };
+      }
+      
+      // Single tag
+      return { tags: [expr.trim()], logic: 'OR' };
+    }
+    
+    async function searchByExpression() {
+      const input = document.getElementById('searchInput').value;
+      const parsed = parseSearchExpression(input);
+      
+      if (!parsed || parsed.tags.length === 0) {
+        // If empty, show all
+        filteredImages = allImages;
+        renderGallery(filteredImages);
+        return;
+      }
+      
+      currentTags = parsed.tags;
+      currentLogic = parsed.logic;
+      await loadImages();
+    }
+    
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      filteredImages = allImages;
+      renderGallery(filteredImages);
+      // Reset to "All" tab
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelector('.tab').classList.add('active');
+    }
+
+    function renderGallery(images) {
+      const gallery = document.getElementById('gallery');
+      const status = document.getElementById('status');
+      if (!images || !images.length) { 
+        status.style.display = 'none';
+        gallery.innerHTML = ''; 
+        return; 
+      }
+      status.style.display = 'none';
+      gallery.innerHTML = images.map((img, i) => `
+        <div class="card" onclick="openViewer(${i})">
+          <img src="${img.url}" alt="${img.id}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22250%22 height=%22200%22%3E%3Crect fill=%22%23eee%22 width=%22250%22 height=%22200%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'">
+          <div class="card-body">
+            <div class="card-title">${img.title || 'Image ' + img.id}</div>
+            <div class="tags">${img.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openViewer(index) {
+      currentIndex = index;
+      const img = filteredImages[index];
+      const viewerImg = document.getElementById('viewerImg');
+      const viewer = document.getElementById('viewer');
+      
+      // Reset image size first
+      viewerImg.style.width = '';
+      viewerImg.style.height = '';
+      viewerImg.src = img.url;
+      
+      // Calculate scaling after image loads
+      viewerImg.onload = () => {
+        const imgWidth = viewerImg.naturalWidth;
+        const imgHeight = viewerImg.naturalHeight;
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        
+        // Calculate scale to fill screen (one dimension touches edge)
+        const scaleX = screenWidth / imgWidth;
+        const scaleY = screenHeight / imgHeight;
+        const scale = Math.min(scaleX, scaleY);
+        
+        viewerImg.style.width = (imgWidth * scale) + 'px';
+        viewerImg.style.height = (imgHeight * scale) + 'px';
+      };
+      
+      viewer.classList.add('active');
+      setupViewerControls();
+    }
+    
+    function setupViewerControls() {
+      const viewer = document.getElementById('viewer');
+      let hideTimeout;
+      
+      const showControls = () => {
+        viewer.classList.add('show-controls');
+        clearTimeout(hideTimeout);
+        hideTimeout = setTimeout(() => {
+          viewer.classList.remove('show-controls');
+        }, 2000);
+      };
+      
+      viewer.onmousemove = showControls;
+      showControls(); // Show initially
+    }
+    
+    function closeViewer() { 
+      const viewer = document.getElementById('viewer');
+      viewer.classList.remove('active', 'show-controls');
+      viewer.onmousemove = null;
+    }
+    function nextImage() { if (currentIndex < filteredImages.length - 1) openViewer(currentIndex + 1); }
+    function prevImage() { if (currentIndex > 0) openViewer(currentIndex - 1); }
+    
+    async function deleteCurrentImage() {
+      const img = filteredImages[currentIndex];
+      if (!img) return;
+      if (!confirm(`画像「${img.title || img.id}」を削除しますか？`)) return;
+      
+      try {
+        const response = await fetch(`/images/${img.id}`, { method: 'DELETE' });
+        if (response.ok) {
+          closeViewer();
+          // Reload all images
+          const imageData = await fetch('/images').then(r => r.json());
+          allImages = imageData.items;
+          filteredImages = allImages;
+          renderGallery(allImages);
+          alert('画像を削除しました');
+        } else {
+          alert('削除に失敗しました');
+        }
+      } catch (e) {
+        alert('エラー: ' + e.message);
+      }
+    }
+
+    function openUploadModal() {
+      document.getElementById('uploadModal').classList.add('active');
+      renderTagCheckboxes();
+    }
+    
+    function closeUploadModal() {
+      document.getElementById('uploadModal').classList.remove('active');
+      document.getElementById('uploadForm').reset();
+      document.getElementById('previewImage').style.display = 'none';
+      selectedDataUrl = null;
+    }
+    
+    function openTagModal() {
+      document.getElementById('tagModal').classList.add('active');
+    }
+    
+    function closeTagModal() {
+      document.getElementById('tagModal').classList.remove('active');
+      document.getElementById('tagForm').reset();
+    }
+    
+    async function handleCreateTag(event) {
+      event.preventDefault();
+      const id = document.getElementById('tagId').value;
+      const name = document.getElementById('tagName').value;
+      const color = document.getElementById('tagColor').value;
+      
+      try {
+        const response = await fetch('/tags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, name, color })
+        });
+        
+        if (response.ok) {
+          closeTagModal();
+          // Reload tags
+          tags = await fetch('/tags').then(r => r.json());
+          alert('タグを追加しました！');
+        } else {
+          const error = await response.json();
+          alert('タグの追加に失敗しました: ' + (error.error || '不明なエラー'));
+        }
+      } catch (e) {
+        alert('エラー: ' + e.message);
+      }
+    }
+    
+    function renderTagCheckboxes() {
+      const container = document.getElementById('tagCheckboxes');
+      container.innerHTML = tags.map(tag => `
+        <div class="tag-checkbox">
+          <input type="checkbox" id="tag-${tag.id}" value="${tag.id}">
+          <label for="tag-${tag.id}">${tag.name}</label>
+        </div>
+      `).join('');
+    }
+    
+    let selectedDataUrl = null;
+
+    async function handleUpload(event) {
+      event.preventDefault();
+      const description = document.getElementById('imageDescription').value;
+      const selectedTags = Array.from(document.querySelectorAll('#tagCheckboxes input:checked')).map(cb => cb.value);
+      
+      if (selectedTags.length === 0) {
+        alert('少なくとも1つのタグを選択してください');
+        return;
+      }
+      if (!selectedDataUrl) {
+        alert('ファイルを選択してください');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataUrl: selectedDataUrl, description, tags: selectedTags })
+        });
+        
+        if (response.ok) {
+          closeUploadModal();
+          // Reload all images
+          const imageData = await fetch('/images').then(r => r.json());
+          allImages = imageData.items;
+          filteredImages = allImages;
+          renderGallery(allImages);
+        } else {
+          alert('画像の追加に失敗しました');
+        }
+      } catch (e) {
+        alert('エラー: ' + e.message);
+      }
+    }
+    
+    function openEditModal() {
+      const img = filteredImages[currentIndex];
+      if (!img) return;
+      
+      document.getElementById('editTitle').value = img.title || '';
+      document.getElementById('editDescription').value = img.description || '';
+      
+      // Render tag checkboxes with current tags pre-selected
+      const container = document.getElementById('editTagCheckboxes');
+      container.innerHTML = tags.map(tag => `
+        <div class="tag-checkbox">
+          <input type="checkbox" id="edit-tag-${tag.id}" value="${tag.id}" ${img.tags.includes(tag.id) ? 'checked' : ''}>
+          <label for="edit-tag-${tag.id}">${tag.name}</label>
+        </div>
+      `).join('');
+      
+      document.getElementById('editModal').classList.add('active');
+    }
+    
+    function closeEditModal() {
+      document.getElementById('editModal').classList.remove('active');
+      document.getElementById('editForm').reset();
+    }
+    
+    async function handleEditImage(event) {
+      event.preventDefault();
+      const img = filteredImages[currentIndex];
+      if (!img) return;
+      
+      const title = document.getElementById('editTitle').value;
+      const description = document.getElementById('editDescription').value;
+      const selectedTags = Array.from(document.querySelectorAll('#editTagCheckboxes input:checked')).map(cb => cb.value);
+      
+      if (selectedTags.length === 0) {
+        alert('少なくとも1つのタグを選択してください');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/images/${img.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description, tags: selectedTags })
+        });
+        
+        if (response.ok) {
+          closeEditModal();
+          // Reload all images
+          const imageData = await fetch('/images').then(r => r.json());
+          allImages = imageData.items;
+          filteredImages = allImages;
+          renderGallery(allImages);
+          // Re-open viewer with updated data
+          openViewer(currentIndex);
+        } else {
+          alert('画像の更新に失敗しました');
+        }
+      } catch (e) {
+        alert('エラー: ' + e.message);
+      }
+    }
+    
+    // Preview image on URL change
+    document.addEventListener('DOMContentLoaded', () => {
+      const previewImg = document.getElementById('previewImage');
+      const dropZone = document.getElementById('dropZone');
+      const fileInput = document.getElementById('fileInput');
+
+      function setPreviewFromFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          selectedDataUrl = ev.target.result;
+          previewImg.src = selectedDataUrl;
+          previewImg.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+      }
+
+      if (fileInput) {
+        fileInput.addEventListener('change', (e) => {
+          const file = e.target.files && e.target.files[0];
+          setPreviewFromFile(file);
+        });
+      }
+      if (dropZone) {
+        ;['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('dragover'); }));
+        ;['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('dragover'); }));
+        dropZone.addEventListener('drop', (e) => {
+          const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          setPreviewFromFile(file);
+        });
+      }
+    });
+
+    document.addEventListener('keydown', e => {
+      if (document.getElementById('viewer').classList.contains('active')) {
+        if (e.key === 'Escape') closeViewer();
+        if (e.key === 'ArrowRight') nextImage();
+        if (e.key === 'ArrowLeft') prevImage();
+        return;
+      }
+      
+      // Enter key in search input triggers search
+      if (e.key === 'Enter' && document.activeElement.id === 'searchInput') {
+        searchByExpression();
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
